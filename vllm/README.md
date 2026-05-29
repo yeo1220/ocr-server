@@ -1,47 +1,42 @@
-# vLLM Qwen OCR (DGX Spark)
+# vLLM on DGX Spark (128GB unified)
 
-`vllm-qwen-ocr` 컨테이너 — **Qwen3-Next-80B-A3B-Thinking-FP8**, API 모델 ID `qwen-ocr`.
+## 권장 모델 (2026 — VL OCR 전환)
 
-## 빠른 시작
+| 용도 | HuggingFace | API ID | 포트 | GPU util |
+|------|-------------|--------|------|----------|
+| **OCR (PDF 페이지 이미지)** | **Qwen/Qwen2.5-VL-32B-Instruct-AWQ** | `qwen-vl-ocr` | 8003 | 0.55 |
+| ai-chat | google/gemma-4-26b-a4b-it | `gemma-chat` | 8000 | 0.38 |
+| (호스트) ocr-server | — | — | 8001 | — |
+
+공개 **Qwen2.5-VL-32B** dense 가중치는 없습니다. 한글 행정 PDF·표·DocVQA 기준으로 **Qwen2.5-VL-32B**가 가장 적합합니다.  
+OOM 시 `VL_HF_MODEL=Qwen/Qwen2.5-VL-32B-Instruct-AWQ` 로 전환하세요.
+
+레거시(Paddle + 14B refine + 80B chat): `OCR_BACKEND=paddle`, `docker compose --profile refine --profile thinking up -d`
+
+## 설치
 
 ```bash
-# 최초 1회: HF 토큰 (기존 ~/vllm/.env 이 있으면 복사)
-cp .env.example .env   # 또는 cp ~/vllm/.env .env
+cd /home/wslaw/ocr-server/vllm
+cp .env.example .env   # HF_TOKEN
 
-chmod +x start.sh stop.sh restart.sh
+chmod +x download-chat-model.sh download-vl-model.sh start.sh
+./download-chat-model.sh
+./download-vl-model.sh
+
 ./start.sh
+cd ../ai-chat && ./start.sh
+source ../env.sh && ../restart.sh   # OCR API
 ```
 
-모델 가중치는 `models/Qwen3-Next-80B-A3B-Thinking-FP8/` 에 두세요.  
-이전 경로(`~/vllm/models`)에서 이관 시 심볼릭 링크로 충분합니다:
+## 확인
 
 ```bash
-ln -sfn /home/wslaw/vllm/models/Qwen3-Next-80B-A3B-Thinking-FP8 \
-  models/Qwen3-Next-80B-A3B-Thinking-FP8
+curl -s http://127.0.0.1:8003/v1/models | jq '.data[].id'   # "qwen-vl-ocr"
+curl -s http://127.0.0.1:8000/v1/models | jq '.data[].id'   # "gemma-chat"
+curl -s http://127.0.0.1:8001/health | jq '.ocr_backend, .vllm_vl_reachable'
 ```
 
-## AI Chat (nginx :8088)
+## 파인튜닝
 
-웹 채팅·OpenAI 프록시는 상위 `ai-chat/` 스택과 함께 기동합니다:
-
-```bash
-/home/wslaw/ocr-server/ai-chat/start.sh
-```
-
-## 이관 (`~/vllm` → 여기)
-
-```bash
-# 1) 기존 컨테이너 중지
-cd ~/vllm && docker compose down
-
-# 2) 설정·모델 링크
-cp ~/vllm/.env /home/wslaw/ocr-server/vllm/.env
-ln -sfn ~/vllm/models/Qwen3-Next-80B-A3B-Thinking-FP8 \
-  /home/wslaw/ocr-server/vllm/models/Qwen3-Next-80B-A3B-Thinking-FP8
-
-# 3) 새 위치에서 기동
-/home/wslaw/ocr-server/vllm/start.sh
-/home/wslaw/ocr-server/ai-chat/start.sh
-```
-
-`~/vllm` 은 더 이상 필요 없으면 백업 후 제거해도 됩니다(모델을 실제로 옮기지 않고 symlink만 쓴 경우 `models/` 디렉터리는 유지).
+한글 재결서 9열 표는 VL **LoRA/전체 파인튜닝** 데이터(페이지 이미지 + JSON 라벨)가 있으면 정확도가 크게 오릅니다.  
+이 저장소는 추론 파이프라인만 제공합니다.

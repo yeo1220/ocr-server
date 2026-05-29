@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
+
+# Rightmost columns often hold amount / owner — empty on wrapped continuation lines.
+_ANCHOR_COL_COUNT = 2
+_BLANK_CELL = frozenset({"", "-", "―", "－"})
 
 
 def _box_center_x(box: list) -> float:
@@ -33,6 +38,205 @@ def _normalize_text(text: str) -> str:
     return " ".join(str(text or "").strip().split())
 
 
+def _box_yrange(box: list) -> tuple[float, float]:
+    ys = [float(p[1]) for p in box if isinstance(p, (list, tuple)) and len(p) >= 2]
+    if not ys:
+        return 0.0, 0.0
+    return min(ys), max(ys)
+
+
+def _blocks_y_extent(blocks: list[dict]) -> tuple[float, float]:
+    y0s: list[float] = []
+    y1s: list[float] = []
+    for b in blocks:
+        lo, hi = _box_yrange(b.get("box") or [])
+        y0s.append(lo)
+        y1s.append(hi)
+    if not y0s:
+        return 0.0, 0.0
+    return min(y0s), max(y1s)
+
+
+def _filled_cols(row: list[str]) -> set[int]:
+    out: set[int] = set()
+    for i, val in enumerate(row):
+        t = (val or "").strip()
+        if t and t not in _BLANK_CELL:
+            out.add(i)
+    return out
+
+
+def _has_anchor_column_values(row: list[str], num_cols: int) -> bool:
+    """True when right-side columns look like a complete row (amount and/or owner)."""
+    start = max(0, num_cols - _ANCHOR_COL_COUNT)
+    for c in range(start, num_cols):
+        t = (row[c] if c < len(row) else "").strip()
+        if not t or t in _BLANK_CELL:
+            continue
+        if re.search(r"\d", t):
+            return True
+        if re.search(r"[가-힣]{2,}", t):
+            return True
+    return False
+
+
+def _median_row_height(row_groups: list[list[dict]]) -> float:
+    heights: list[float] = []
+    for group in row_groups:
+        y0, y1 = _blocks_y_extent(group)
+        if y1 > y0:
+            heights.append(y1 - y0)
+    if not heights:
+        return 14.0
+    heights.sort()
+    return heights[len(heights) // 2]
+
+
+def should_merge_continuation_rows(
+    row_above: list[str],
+    row_below: list[str],
+    num_cols: int,
+    *,
+    allow_vertical_gap: bool = True,
+    vertical_gap: float | None = None,
+    median_h: float = 14.0,
+) -> bool:
+    """True when *row_below* is a wrapped continuation of the same logical table row."""
+    filled_below = _filled_cols(row_below)
+    if not filled_below:
+        return False
+
+    if not allow_vertical_gap and vertical_gap is not None:
+        if median_h > 0 and vertical_gap > median_h * 2.25:
+            return False
+    elif vertical_gap is not None and median_h > 0:
+        if vertical_gap > median_h * 3.0:
+            return False
+
+    if _has_anchor_column_values(row_below, num_cols):
+        return False
+
+    filled_above = _filled_cols(row_above)
+    if not filled_above:
+        return False
+
+    anchor_start = max(0, num_cols - _ANCHOR_COL_COUNT)
+    below_body = {c for c in filled_below if c < anchor_start}
+    if not below_body:
+        return False
+
+    # Same filled columns = two complete records, not a wrap continuation.
+    if filled_below == filled_above:
+        return False
+
+    if filled_below < filled_above:
+        return True
+
+    if max(filled_below) <= max(filled_above) + 2 and below_body:
+        return True
+
+    # Single continuation column (long 구조 및 규격 wrap).
+    if len(filled_below) == 1 and next(iter(filled_below)) in filled_above:
+        return True
+
+    return False
+
+
+def _should_merge_wrap_continuation(
+    row_above: list[str],
+    row_below: list[str],
+    blocks_above: list[dict],
+    blocks_below: list[dict],
+    num_cols: int,
+    median_h: float,
+) -> bool:
+    from table_structure import is_fragment_continuation_row
+
+    if is_fragment_continuation_row(row_above, row_below, num_cols):
+        return True
+    gap = _blocks_y_extent(blocks_below)[0] - _blocks_y_extent(blocks_above)[1]
+    return should_merge_continuation_rows(
+        row_above,
+        row_below,
+        num_cols,
+        allow_vertical_gap=False,
+        vertical_gap=gap,
+        median_h=median_h,
+    )
+
+
+def _merge_row_pair(
+    row_above: list[str],
+    row_below: list[str],
+    grid_above: list[list[dict]],
+    grid_below: list[list[dict]],
+    num_cols: int,
+) -> tuple[list[str], list[list[dict]]]:
+    merged_row: list[str] = []
+    merged_grid: list[list[dict]] = []
+    for c in range(num_cols):
+        a = row_above[c] if c < len(row_above) else ""
+        b = row_below[c] if c < len(row_below) else ""
+        if a.strip() and b.strip():
+            merged_row.append(_normalize_text(f"{a} {b}"))
+        else:
+            merged_row.append(a.strip() or b.strip())
+        merged_grid.append((grid_above[c] if c < len(grid_above) else []) + (
+            grid_below[c] if c < len(grid_below) else []
+        ))
+    return merged_row, merged_grid
+
+
+def _merge_wrapped_table_rows(
+    table_rows: list[list[str]],
+    grid: list[list[list[dict]]],
+    row_block_groups: list[list[dict]],
+    num_cols: int,
+) -> tuple[list[list[str]], list[list[list[dict]]], list[list[dict]]]:
+    """Merge OCR rows that are vertical wraps within one printed table row."""
+    if len(table_rows) < 2:
+        return table_rows, grid, row_block_groups
+
+    median_h = _median_row_height(row_block_groups)
+    merged_rows: list[list[str]] = [list(table_rows[0])]
+    merged_grid: list[list[list[dict]]] = [
+        [list(cell) for cell in grid[0]],
+    ]
+    merged_groups: list[list[dict]] = [list(row_block_groups[0])]
+
+    for i in range(1, len(table_rows)):
+        if _should_merge_wrap_continuation(
+            merged_rows[-1],
+            table_rows[i],
+            merged_groups[-1],
+            row_block_groups[i],
+            num_cols,
+            median_h,
+        ):
+            merged_rows[-1], merged_grid[-1] = _merge_row_pair(
+                merged_rows[-1],
+                table_rows[i],
+                merged_grid[-1],
+                grid[i],
+                num_cols,
+            )
+            merged_groups[-1] = merged_groups[-1] + row_block_groups[i]
+        else:
+            merged_rows.append(list(table_rows[i]))
+            merged_grid.append([list(cell) for cell in grid[i]])
+            merged_groups.append(list(row_block_groups[i]))
+
+    return merged_rows, merged_grid, merged_groups
+
+
+def _preview_texts_for_row(row_blocks: list[dict]) -> list[str]:
+    ordered = sorted(
+        row_blocks,
+        key=lambda b: _box_center_x(b.get("box") or []),
+    )
+    return [_normalize_text(b.get("text", "")) for b in ordered if b.get("text")]
+
+
 def _cluster_rows(blocks: list[dict]) -> list[list[dict]]:
     if not blocks:
         return []
@@ -60,7 +264,14 @@ def _cluster_rows(blocks: list[dict]) -> list[list[dict]]:
 
 
 def _merge_blocks_in_cell(blocks: list[dict]) -> dict:
-    blocks = sorted(blocks, key=lambda b: _box_xrange(b.get("box") or [])[0])
+    # Multiline cell: top-to-bottom, then left-to-right within a line.
+    blocks = sorted(
+        blocks,
+        key=lambda b: (
+            _box_center_y(b.get("box") or []),
+            _box_xrange(b.get("box") or [])[0],
+        ),
+    )
     text = _normalize_text(" ".join(_normalize_text(b.get("text", "")) for b in blocks))
     score = sum(float(b.get("score") or 0.0) for b in blocks) / max(1, len(blocks))
     return {"text": text, "score": float(score), "box": blocks[0].get("box")}
@@ -171,6 +382,13 @@ def build_table(
 
     n_header = max(1, header_rows)
     rows = _cluster_rows(raw_blocks)
+    if rows:
+        from table_structure import find_table_region_start
+
+        preview_rows = [_preview_texts_for_row(g) for g in rows]
+        start = find_table_region_start(preview_rows, n_header)
+        if start > 0:
+            rows = rows[start:]
     if not rows:
         return {
             "cols": num_cols,
@@ -205,12 +423,34 @@ def build_table(
             grid[r_idx][c_idx].append(block)
 
     table_rows: list[list[str]] = []
-    table_scores: list[list[float]] = []
-    cells: list[dict] = []
+    for row_cells in grid:
+        row_texts: list[str] = []
+        for cell_blocks in row_cells:
+            if cell_blocks:
+                row_texts.append(_merge_blocks_in_cell(cell_blocks)["text"])
+            else:
+                row_texts.append("")
+        table_rows.append(row_texts)
 
+    if n_header < len(table_rows):
+        head_rows = table_rows[:n_header]
+        body_rows = table_rows[n_header:]
+        body_grid = grid[n_header:]
+        body_groups = rows[n_header:]
+        body_rows, body_grid, body_groups = _merge_wrapped_table_rows(
+            body_rows, body_grid, body_groups, num_cols
+        )
+        table_rows = head_rows + body_rows
+        grid = grid[:n_header] + body_grid
+        rows = rows[:n_header] + body_groups
+    else:
+        table_rows, grid, rows = _merge_wrapped_table_rows(
+            table_rows, grid, rows, num_cols
+        )
+
+    cells: list[dict] = []
     for r_idx, row_cells in enumerate(grid):
         row_texts: list[str] = []
-        row_scores: list[float] = []
         for c_idx, cell_blocks in enumerate(row_cells):
             if cell_blocks:
                 merged = _merge_blocks_in_cell(cell_blocks)
@@ -220,7 +460,6 @@ def build_table(
                 text = ""
                 score = 0.0
             row_texts.append(text)
-            row_scores.append(score)
             cells.append(
                 {
                     "row": r_idx,
@@ -229,8 +468,7 @@ def build_table(
                     "score": round(score, 4),
                 }
             )
-        table_rows.append(row_texts)
-        table_scores.append(row_scores)
+        table_rows[r_idx] = row_texts
 
     if n_header > 1:
         headers = [
@@ -243,7 +481,7 @@ def build_table(
         )
         data = [row for i, row in enumerate(table_rows) if i != header_row]
 
-    return {
+    result = {
         "cols": num_cols,
         "header_row": header_row,
         "header_rows": n_header,
@@ -254,6 +492,10 @@ def build_table(
         "cells": cells,
         "col_boundaries": [round(x, 2) for x in boundaries],
     }
+    from table_structure import apply_rule_structure_fix
+
+    result, _ = apply_rule_structure_fix(result)
+    return result
 
 
 def table_to_text(table: dict[str, Any]) -> str:

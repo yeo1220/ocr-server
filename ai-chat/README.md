@@ -1,15 +1,19 @@
 # AI Chat (DGX Spark + nginx + OpenAI API)
 
-## 선정 모델
+## 선정 모델 (2026 — Gemma 4 chat)
 
 | 항목 | 값 |
 |------|-----|
-| **모델** | [Qwen3-Next-80B-A3B-Thinking-FP8](https://huggingface.co/Qwen/Qwen3-Next-80B-A3B-Thinking-FP8) |
-| **이유** | DGX Spark(128GB 통합 메모리, GB10)에 맞는 MoE(80B 총량, 토큰당 ~3B 활성), FP8로 ~77GB, 한국어·추론·코딩 균형 |
-| **서빙** | `hellohal2064/vllm-dgx-spark-gb10` (CUDA 13 / sm_121) |
-| **API 모델 ID** | `qwen-ocr` (Hermes `config.yaml`과 동일) |
+| **모델** | google/gemma-4-26b-a4b-it |
+| **컨테이너** | `vllm-gemma-chat` |
+| **이유** | DGX Spark(128GB, GB10)에서 OCR(`vllm-qwen-vl-ocr`)과 동시 구동 가능한 경량 MoE, 한국어 대화·요약 균형 |
+| **서빙** | `vllm/vllm-openai:gemma4-cu130` (CUDA 13 / GB10 sm_121) |
+| **API 모델 ID** | `gemma-chat` |
+| **포트** | vLLM `:8000` → nginx `:8088` |
 
-OCR 서버(~15GB)와 동시 사용 시 `GPU_MEMORY_UTIL=0.72`, `MAX_MODEL_LEN=32768`로 메모리를 나눕니다.
+OCR 스택과 동시 사용 시 GPU util은 `docker-compose.yaml`의 `CHAT_GPU_MEMORY_UTIL`(기본 0.38), `CHAT_MAX_MODEL_LEN`(기본 32768)로 조정합니다.
+
+> 레거시 80B Thinking 스택(`vllm-thinking-chat`, 모델 ID `qwen-thinking-chat`)은 `--profile thinking` 으로만 기동됩니다.
 
 ## 아키텍처
 
@@ -19,7 +23,7 @@ OCR 서버(~15GB)와 동시 사용 시 `GPU_MEMORY_UTIL=0.72`, `MAX_MODEL_LEN=32
         ▼  :8088
   ai-chat-nginx (Docker)
     ├─ /chat/  → 정적 웹 UI
-    └─ /v1/    → host:8000 (vLLM OpenAI API)
+    └─ /v1/    → vllm-gemma-chat:8000 (vLLM OpenAI API)
 ```
 
 ## 빠른 시작
@@ -36,8 +40,8 @@ vLLM만 기동: `/home/wslaw/ocr-server/vllm/start.sh`
 vLLM 첫 기동은 모델 로딩에 **약 8~15분** 걸릴 수 있습니다.
 
 ```bash
-docker logs -f vllm-qwen-ocr
-curl -s http://127.0.0.1:8000/v1/models
+docker logs -f vllm-gemma-chat
+curl -s http://127.0.0.1:8088/v1/models | jq '.data[].id'   # "gemma-chat"
 ```
 
 ## OpenAI 호환 API
@@ -47,7 +51,7 @@ curl http://localhost:8088/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer local" \
   -d '{
-    "model": "qwen-ocr",
+    "model": "gemma-chat",
     "messages": [{"role": "user", "content": "안녕하세요"}],
     "max_tokens": 512
   }'
@@ -60,11 +64,13 @@ from openai import OpenAI
 
 client = OpenAI(base_url="http://localhost:8088/v1", api_key="local")
 r = client.chat.completions.create(
-    model="qwen-ocr",
+    model="gemma-chat",
     messages=[{"role": "user", "content": "안녕"}],
 )
 print(r.choices[0].message.content)
 ```
+
+> Django 운영 서버 연동(OCR + AI Chat): [../docs/DJANGO_INTEGRATION.md](../docs/DJANGO_INTEGRATION.md)
 
 ## 호스트 nginx 사용 (선택)
 

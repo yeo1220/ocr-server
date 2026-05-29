@@ -70,6 +70,34 @@ class TableBuilderTests(unittest.TestCase):
         self.assertEqual(table["headers"][1], "보상액 단가")
         self.assertEqual(len(table["all_rows"]), 3)
 
+    def test_multiline_cell_merged_into_one_row(self):
+        """Wrapped cell text (2nd line) must not become a separate data row."""
+        bounds = [0, 95, 165, 195, 285, 395, 485, 555, 620]
+        blocks = [
+            _block("소재지", 10, 8, 90, 26),
+            _block("구조 및 규격", 290, 8, 390, 26),
+            _block("금액", 400, 8, 480, 26),
+            _block("소유자", 490, 8, 560, 26),
+            _block("경기도 화성시", 10, 48, 90, 66),
+            _block("554-4", 100, 48, 160, 66),
+            _block("대", 170, 48, 190, 66),
+            _block("설정범위 해수면", 290, 48, 385, 66),
+            _block("1,000,000", 400, 48, 480, 66),
+            _block("홍길동", 490, 48, 560, 66),
+            # wrapped continuation — same columns, no amount/owner
+            _block("더하기 3미터", 290, 70, 385, 88),
+        ]
+        table = build_table(
+            blocks,
+            num_cols=8,
+            header_rows=1,
+            col_boundaries=bounds,
+        )
+        self.assertEqual(len(table["data"]), 1, table["data"])
+        merged_spec = " ".join(table["data"][0])
+        self.assertIn("설정범위", merged_spec)
+        self.assertIn("더하기", merged_spec)
+
     def test_export_table_aliases(self):
         table = build_table(
             [

@@ -184,12 +184,31 @@ def _resolve_device() -> str:
     return "cpu"
 
 
+def _recognition_model_name() -> str:
+    # PP-OCRv5 ships only korean_PP-OCRv5_mobile_rec (no korean server rec).
+    return "korean_PP-OCRv5_mobile_rec"
+
+
+def _detection_model_name() -> str:
+    if settings.ocr_rec_model == "mobile":
+        return "PP-OCRv5_mobile_det"
+    return "PP-OCRv5_server_det"
+
+
 def _build_ocr(device: str) -> PaddleOCR:
+    det_model = _detection_model_name()
+    rec_model = _recognition_model_name()
+    logger.info(
+        "PaddleOCR det=%s rec=%s (profile=%s)",
+        det_model,
+        rec_model,
+        settings.ocr_rec_model,
+    )
     return PaddleOCR(
         lang="korean",
         ocr_version="PP-OCRv5",
-        text_detection_model_name="PP-OCRv5_server_det",
-        text_recognition_model_name="korean_PP-OCRv5_mobile_rec",
+        text_detection_model_name=det_model,
+        text_recognition_model_name=rec_model,
         device=device,
         cpu_threads=settings.cpu_threads,
         use_doc_orientation_classify=True,

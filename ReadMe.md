@@ -236,15 +236,36 @@ PaddleOCR (방향 보정 + 왜곡 보정 + PP-OCRv5 한국어)
 JSON 응답 (텍스트, blocks, score) + /tmp/ocr_results/{job_id}.json 저장
 ```
 
+## vLLM 표 보정 (DGX Spark 128GB)
+
+PaddleOCR 1차 인식 후, 저신뢰 셀은 **Qwen2.5-14B-Instruct** (`qwen-refine`, `:8002`)로 보정합니다.  
+128GB 통합 메모리에서 한글 표 OCR에 가장 적합한 구성이며, 80B chat(`:8088`)과 함께 쓸 수 있습니다.
+
+| 구성 | GPU util (기본) |
+|------|-----------------|
+| PaddleOCR (호스트) | ~15GB |
+| vLLM chat 80B | 0.52 |
+| vLLM refine **14B** | 0.26 |
+
+`env.dgx-spark-128gb.sh`가 `env.sh`에서 자동 로드됩니다. 상세: [vllm/README.md](vllm/README.md)
+
+```bash
+cd vllm && ./download-refine-model.sh && ./start.sh && cd .. && ./restart.sh
+```
+
+표 OCR: `format=table`, `refine=vllm`. Django: [docs/DJANGO_INTEGRATION.md](docs/DJANGO_INTEGRATION.md)
+
 ## AI Chat (LLM + nginx)
 
-DGX Spark에 맞춘 **Qwen3-Next-80B-A3B-Thinking-FP8** 모델을 vLLM으로 서빙하고, nginx로 웹 채팅·OpenAI 호환 API를 제공합니다.
+DGX Spark에 맞춘 **Gemma 4** 모델(`vllm-gemma-chat`)을 vLLM으로 서빙하고, nginx로 웹 채팅·OpenAI 호환 API를 제공합니다.
 
 | 항목 | URL |
 |------|-----|
 | 웹 채팅 | `http://<호스트>:8088/chat/` |
 | OpenAI API | `http://<호스트>:8088/v1/` |
-| 모델 ID | `qwen-ocr` |
+| 모델 ID | `gemma-chat` |
+
+> 레거시 80B Thinking 스택(`qwen-thinking-chat`)은 `docker compose --profile thinking up -d` 로만 기동됩니다.
 
 상세: **[ai-chat/README.md](ai-chat/README.md)**
 
@@ -257,7 +278,7 @@ vLLM Docker 상세: **[vllm/README.md](vllm/README.md)**
 
 ## Django 연동
 
-Django 운영 서버에서 OCR API를 호출하는 방법(설정, 클라이언트 코드, Celery 비동기, 트러블슈팅):
+Django 운영 서버에서 **OCR 분석(`vllm-qwen-vl-ocr`)** 과 **AI Chat(`vllm-gemma-chat`)** 을 호출하는 방법(설정, 클라이언트 코드, 동기/스트리밍, Celery 비동기, OCR→Chat 요약, 트러블슈팅):
 
 **[docs/DJANGO_INTEGRATION.md](docs/DJANGO_INTEGRATION.md)**
 

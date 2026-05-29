@@ -1,24 +1,21 @@
+# DGX Spark 128GB: Gemma 4 chat (:8000) + Qwen2.5-VL-32B-AWQ OCR (:8003).
+# Image: ghcr.io/timothystewart6/vllm-gb10:v0.20.1-gb10.0
+#   (vLLM v0.20.1, CUDA 13.2 / PyTorch 2.11, ARM64 native, GB10 sm_121a 전용 빌드 · upstream 추적 · 불변 핀 태그).
+#   entrypoint가 없으므로 command는 'vllm serve <model>' 형식으로 시작해야 함.
+# Paddle OCR API on host :8001. Thinking chat 80B stack: docker compose --profile think --profile thinking up -d
+
 services:
-  vllm-ocr:
-    image: hellohal2064/vllm-dgx-spark-gb10:latest
-    container_name: vllm-qwen-ocr
+  vllm-chat:
+    image: ghcr.io/timothystewart6/vllm-gb10:v0.20.1-gb10.0
+    container_name: vllm-gemma-chat
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - HF_HOME=/root/.cache/huggingface
       - HF_TOKEN=${HF_TOKEN}
-      - MODEL_PATH=/models/Qwen3-Next-80B-A3B-Thinking-FP8
-      - HOST=0.0.0.0
-      - PORT=8000
-      # OCR(~15GB)와 공존: 통합 메모리 128GB 중 vLLM 점유율 상한
-      - GPU_MEMORY_UTIL=0.72
-      - MAX_MODEL_LEN=32768
-      - TORCH_BLAS_PREFER_HIP=0
       - VLLM_LOGGING_LEVEL=INFO
-      - TORCH_CUDA_ARCH_LIST=12.1a
-      - VLLM_FLASHINFER_MOE_BACKEND=latency
     volumes:
       - ${HOME}/.cache/huggingface:/root/.cache/huggingface
-      - ./models/Qwen3-Next-80B-A3B-Thinking-FP8:/models/Qwen3-Next-80B-A3B-Thinking-FP8:ro
+      - ./models:/models:ro
     ports:
       - "8000:8000"
     ipc: host
@@ -41,5 +38,85 @@ services:
       start_period: 600s
     restart: unless-stopped
     command: >
+      vllm serve /models/${CHAT_MODEL_DIR:-gemma-4-26b-a4b-it}
+      --served-model-name gemma-chat
+      --host 0.0.0.0 --port 8000
+      --gpu-memory-utilization ${CHAT_GPU_MEMORY_UTIL:-0.38}
+      --max-model-len ${CHAT_MAX_MODEL_LEN:-32768}
       --trust-remote-code
-      --served-model-name qwen-ocr
+
+  vllm-ocr-vl:
+    image: ghcr.io/timothystewart6/vllm-gb10:v0.20.1-gb10.0
+    container_name: vllm-qwen-vl-ocr
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HF_HOME=/root/.cache/huggingface
+      - HF_TOKEN=${HF_TOKEN}
+      - VLLM_LOGGING_LEVEL=INFO
+    volumes:
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+      - ./models:/models:ro
+    ports:
+      - "8003:8003"
+    ipc: host
+    shm_size: "16g"
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8003/v1/models"]
+      interval: 30s
+      timeout: 15s
+      retries: 30
+      start_period: 900s
+    restart: unless-stopped
+    command: >
+      vllm serve /models/${VL_MODEL_DIR:-Qwen2.5-VL-32B-Instruct-AWQ}
+      --served-model-name qwen-vl-ocr
+      --host 0.0.0.0 --port 8003
+      --gpu-memory-utilization ${VL_GPU_MEMORY_UTIL:-0.55}
+      --max-model-len ${VL_MAX_MODEL_LEN:-16384}
+      --max-num-batched-tokens ${VL_MAX_NUM_BATCHED_TOKENS:-4096}
+      --trust-remote-code
+      --limit-mm-per-prompt '{"image":1}'
+
+  vllm-thinking-chat:
+    image: hellohal2064/vllm-dgx-spark-gb10:latest
+    container_name: vllm-thinking-chat
+    profiles:
+      - thinking
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HF_HOME=/root/.cache/huggingface
+      - HF_TOKEN=${HF_TOKEN}
+      - VLLM_LOGGING_LEVEL=INFO
+      - VLLM_FLASHINFER_MOE_BACKEND=latency
+    volumes:
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+      - ./models/Qwen3-Next-80B-A3B-Thinking-FP8:/models/Qwen3-Next-80B-A3B-Thinking-FP8:ro
+    ports:
+      - "8000:8000"
+    ipc: host
+    shm_size: "16g"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+    command: >
+      vllm serve /models/Qwen3-Next-80B-A3B-Thinking-FP8
+      --served-model-name qwen-thinking-chat
+      --host 0.0.0.0 --port 8000
+      --gpu-memory-utilization ${CHAT_GPU_MEMORY_UTIL:-0.52}
+      --max-model-len 32768
+      --trust-remote-code
