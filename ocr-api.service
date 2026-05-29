@@ -3,11 +3,22 @@ Description=DGX OCR FastAPI Server
 After=network.target
 
 [Service]
+Type=simple
 User=wslaw
 WorkingDirectory=/home/wslaw/ocr-server
+# env.sh(선택) + cuDNN 경로 — env.sh 미적용 시에도 GPU가 동작하도록 기본값 고정
+Environment=OCR_DEVICE=gpu:0
+Environment=OCR_DPI=300
+Environment=OCR_WORKERS=8
+Environment=OCR_CPU_THREADS=20
+Environment=CUDA_VISIBLE_DEVICES=0
+Environment=LD_LIBRARY_PATH=/home/wslaw/local/cudnn/usr/lib/aarch64-linux-gnu
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=/home/wslaw/ocr-server/run.sh
-Restart=always
+Restart=on-failure
 RestartSec=5
+TimeoutStopSec=120
+KillMode=mixed
 
 [Install]
 WantedBy=multi-user.target

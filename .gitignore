@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+*.bak
 *.so
 .Python
 *.egg-info/
@@ -59,3 +60,4 @@ ocr_results/
 
 # Docker (local overrides)
 docker-compose.override.yml
+ocr_engine.py.bak

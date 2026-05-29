@@ -47,6 +47,89 @@ def _result_to_dict(page_result: Any) -> dict:
     return {}
 
 
+def _normalize_ocr_text(text: str) -> str:
+    t = str(text or "").strip()
+    return " ".join(t.split())
+
+
+def _box_center_y(box: list) -> float:
+    ys = [float(p[1]) for p in box if isinstance(p, (list, tuple)) and len(p) >= 2]
+    return (sum(ys) / len(ys)) if ys else 0.0
+
+
+def _box_xrange(box: list) -> tuple[float, float]:
+    xs = [float(p[0]) for p in box if isinstance(p, (list, tuple)) and len(p) >= 2]
+    if not xs:
+        return 0.0, 0.0
+    return min(xs), max(xs)
+
+
+def _box_height(box: list) -> float:
+    ys = [float(p[1]) for p in box if isinstance(p, (list, tuple)) and len(p) >= 2]
+    if not ys:
+        return 0.0
+    return max(ys) - min(ys)
+
+
+def _merge_line_blocks(blocks: list[dict]) -> tuple[list[dict], list[str]]:
+    """Merge adjacent OCR fragments on same line to reduce split-cell noise."""
+    if not blocks:
+        return [], []
+
+    ordered = sorted(
+        blocks,
+        key=lambda b: (_box_center_y(b.get("box") or []), _box_xrange(b.get("box") or [])[0]),
+    )
+    heights = sorted(
+        h for h in (_box_height(b.get("box") or []) for b in ordered) if h > 0
+    )
+    med_h = heights[len(heights) // 2] if heights else 12.0
+    y_tol = max(6.0, med_h * 0.65)
+    gap_tol = max(10.0, med_h * 1.5)
+
+    lines: list[list[dict]] = []
+    for b in ordered:
+        cy = _box_center_y(b.get("box") or [])
+        if not lines:
+            lines.append([b])
+            continue
+        prev_line = lines[-1]
+        prev_cy = sum(_box_center_y(x.get("box") or []) for x in prev_line) / len(prev_line)
+        if abs(cy - prev_cy) <= y_tol:
+            prev_line.append(b)
+        else:
+            lines.append([b])
+
+    merged_blocks: list[dict] = []
+    merged_lines: list[str] = []
+    for line in lines:
+        line = sorted(line, key=lambda b: _box_xrange(b.get("box") or [])[0])
+        groups: list[list[dict]] = [[line[0]]]
+        for b in line[1:]:
+            prev = groups[-1][-1]
+            prev_x1 = _box_xrange(prev.get("box") or [])[1]
+            cur_x0 = _box_xrange(b.get("box") or [])[0]
+            if (cur_x0 - prev_x1) <= gap_tol:
+                groups[-1].append(b)
+            else:
+                groups.append([b])
+
+        line_text_parts: list[str] = []
+        for g in groups:
+            txt = _normalize_ocr_text(" ".join(_normalize_ocr_text(x.get("text", "")) for x in g))
+            if not txt:
+                continue
+            score = sum(float(x.get("score") or 0.0) for x in g) / max(1, len(g))
+            box = g[0].get("box")
+            merged_blocks.append({"text": txt, "score": float(score), "box": box})
+            line_text_parts.append(txt)
+
+        if line_text_parts:
+            merged_lines.append(" ".join(line_text_parts).strip())
+
+    return merged_blocks, merged_lines
+
+
 def _is_cudnn_error(exc: BaseException) -> bool:
     msg = str(exc).lower()
     return "dnn handle" in msg or "cudnn" in msg
@@ -195,14 +278,21 @@ def run_ocr_image(image_path: str) -> dict:
         boxes = page.get("rec_polys", page.get("dt_polys", []))
 
         for text, score, box in zip(texts, page_scores, boxes):
+            text = _normalize_ocr_text(text)
+            if not text:
+                continue
             box = box.tolist() if hasattr(box, "tolist") else box
             lines.append(text)
             scores.append(float(score))
             blocks.append({"text": text, "score": float(score), "box": box})
 
+    merged_blocks, merged_lines = _merge_line_blocks(blocks)
+    final_blocks = merged_blocks or blocks
+    final_lines = merged_lines or lines
     avg_score = sum(scores) / len(scores) if scores else 0.0
     return {
-        "text": "\n".join(lines),
-        "blocks": blocks,
+        "text": "\n".join(final_lines),
+        "blocks": final_blocks,
+        "raw_blocks": blocks,
         "avg_score": round(avg_score, 4),
     }
