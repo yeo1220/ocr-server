@@ -24,10 +24,14 @@ OCR 서버(~15GB)와 동시 사용 시 `GPU_MEMORY_UTIL=0.72`, `MAX_MODEL_LEN=32
 
 ## 빠른 시작
 
+vLLM 백엔드는 `ocr-server/vllm/` 에 있습니다.
+
 ```bash
-chmod +x /home/wslaw/ocr-server/ai-chat/start.sh
+chmod +x /home/wslaw/ocr-server/vllm/*.sh /home/wslaw/ocr-server/ai-chat/start.sh
 /home/wslaw/ocr-server/ai-chat/start.sh
 ```
+
+vLLM만 기동: `/home/wslaw/ocr-server/vllm/start.sh`
 
 vLLM 첫 기동은 모델 로딩에 **약 8~15분** 걸릴 수 있습니다.
 

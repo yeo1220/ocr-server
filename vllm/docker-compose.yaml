@@ -1,0 +1,45 @@
+services:
+  vllm-ocr:
+    image: hellohal2064/vllm-dgx-spark-gb10:latest
+    container_name: vllm-qwen-ocr
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HF_HOME=/root/.cache/huggingface
+      - HF_TOKEN=${HF_TOKEN}
+      - MODEL_PATH=/models/Qwen3-Next-80B-A3B-Thinking-FP8
+      - HOST=0.0.0.0
+      - PORT=8000
+      # OCR(~15GB)와 공존: 통합 메모리 128GB 중 vLLM 점유율 상한
+      - GPU_MEMORY_UTIL=0.72
+      - MAX_MODEL_LEN=32768
+      - TORCH_BLAS_PREFER_HIP=0
+      - VLLM_LOGGING_LEVEL=INFO
+      - TORCH_CUDA_ARCH_LIST=12.1a
+      - VLLM_FLASHINFER_MOE_BACKEND=latency
+    volumes:
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+      - ./models/Qwen3-Next-80B-A3B-Thinking-FP8:/models/Qwen3-Next-80B-A3B-Thinking-FP8:ro
+    ports:
+      - "8000:8000"
+    ipc: host
+    shm_size: "16g"
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8000/v1/models"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 600s
+    restart: unless-stopped
+    command: >
+      --trust-remote-code
+      --served-model-name qwen-ocr

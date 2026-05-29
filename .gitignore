@@ -60,4 +60,8 @@ ocr_results/
 
 # Docker (local overrides)
 docker-compose.override.yml
+
+# vLLM (weights are large; keep local only)
+vllm/.env
+vllm/models/
 ocr_engine.py.bak

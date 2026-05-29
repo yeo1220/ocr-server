@@ -239,8 +239,11 @@ DGX Spark에 맞춘 **Qwen3-Next-80B-A3B-Thinking-FP8** 모델을 vLLM으로 서
 상세: **[ai-chat/README.md](ai-chat/README.md)**
 
 ```bash
-/home/wslaw/ocr-server/ai-chat/start.sh
+/home/wslaw/ocr-server/ai-chat/start.sh   # vllm + nginx
+# vLLM만: /home/wslaw/ocr-server/vllm/start.sh
 ```
+
+vLLM Docker 상세: **[vllm/README.md](vllm/README.md)**
 
 ## Django 연동
 

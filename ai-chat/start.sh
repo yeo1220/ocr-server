@@ -2,7 +2,8 @@
 # AI Chat 스택: vLLM(백엔드) + nginx(웹/API 프록시)
 set -euo pipefail
 
-VLLM_DIR="${HOME}/vllm"
+OCR_SERVER_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+VLLM_DIR="${OCR_SERVER_DIR}/vllm"
 AI_CHAT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo "==> vLLM 시작 (${VLLM_DIR})"
