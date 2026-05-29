@@ -3,6 +3,8 @@ import ctypes.util
 import logging
 import os
 import tempfile
+from collections.abc import Mapping
+from typing import Any
 
 import paddle
 from paddleocr import PaddleOCR
@@ -18,6 +20,31 @@ _CUDNN_PATHS = [
     "/home/wslaw/local/cudnn/usr/lib/aarch64-linux-gnu/libcudnn.so.9",
     "/usr/lib/aarch64-linux-gnu/libcudnn.so.9",
 ]
+
+
+def _result_to_dict(page_result: Any) -> dict:
+    """Normalize PaddleOCR page result objects/dicts to a plain dict."""
+    if isinstance(page_result, Mapping):
+        return dict(page_result)
+    if hasattr(page_result, "json"):
+        value = getattr(page_result, "json")
+        if isinstance(value, Mapping):
+            return dict(value)
+    if hasattr(page_result, "to_dict"):
+        try:
+            value = page_result.to_dict()
+            if isinstance(value, Mapping):
+                return dict(value)
+        except Exception:
+            pass
+    if hasattr(page_result, "model_dump"):
+        try:
+            value = page_result.model_dump()
+            if isinstance(value, Mapping):
+                return dict(value)
+        except Exception:
+            pass
+    return {}
 
 
 def _is_cudnn_error(exc: BaseException) -> bool:
@@ -161,10 +188,11 @@ def run_ocr_image(image_path: str) -> dict:
     for page_result in result:
         if not page_result:
             continue
+        page = _result_to_dict(page_result)
 
-        texts = page_result.get("rec_texts", [])
-        page_scores = page_result.get("rec_scores", [])
-        boxes = page_result.get("rec_polys", page_result.get("dt_polys", []))
+        texts = page.get("rec_texts", [])
+        page_scores = page.get("rec_scores", [])
+        boxes = page.get("rec_polys", page.get("dt_polys", []))
 
         for text, score, box in zip(texts, page_scores, boxes):
             box = box.tolist() if hasattr(box, "tolist") else box
