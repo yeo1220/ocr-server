@@ -121,31 +121,74 @@ def _col_index(cx: float, boundaries: list[float]) -> int:
     return len(boundaries) - 2
 
 
+def _merge_header_cells(table_rows: list[list[str]], col: int, n_header: int) -> str:
+    """Merge the first *n_header* grid rows into one header label per column."""
+    parts: list[str] = []
+    for r in range(min(n_header, len(table_rows))):
+        if col >= len(table_rows[r]):
+            continue
+        t = _normalize_text(table_rows[r][col])
+        if t and t not in parts:
+            parts.append(t)
+    return " ".join(parts)
+
+
+def export_table_aliases(table: dict[str, Any]) -> dict[str, Any]:
+    """Add ``rows`` / ``rows_refined`` keys for Django decision_tasks consumers."""
+    all_rows = table.get("all_rows")
+    header_rows = int(table.get("header_rows", 1))
+
+    if all_rows:
+        table["rows"] = [list(r) for r in all_rows]
+    else:
+        headers = list(table.get("headers") or [])
+        data = table.get("data") or []
+        table["rows"] = [headers] + [list(r) for r in data]
+
+    data_refined = table.get("data_refined")
+    if data_refined is not None:
+        if all_rows:
+            table["rows_refined"] = [list(r) for r in all_rows[:header_rows]] + [
+                list(r) for r in data_refined
+            ]
+        else:
+            headers = list(table.get("headers") or [])
+            table["rows_refined"] = [headers] + [list(r) for r in data_refined]
+    return table
+
+
 def build_table(
     raw_blocks: list[dict],
     *,
     num_cols: int,
     header_row: int = 0,
+    header_rows: int = 1,
     col_boundaries: list[float] | None = None,
 ) -> dict[str, Any]:
     """Map OCR blocks onto a fixed-column grid using box coordinates."""
     if num_cols < 1:
         raise ValueError("num_cols must be >= 1")
 
+    n_header = max(1, header_rows)
     rows = _cluster_rows(raw_blocks)
     if not rows:
         return {
             "cols": num_cols,
             "header_row": header_row,
+            "header_rows": n_header,
             "row_count": 0,
             "headers": [""] * num_cols,
             "data": [],
+            "all_rows": [],
             "cells": [],
             "col_boundaries": _derive_col_boundaries([], num_cols, [], col_boundaries),
         }
 
+    hdr_blocks: list[dict] = []
+    for r in range(min(n_header, len(rows))):
+        hdr_blocks.extend(rows[r])
     boundaries = _derive_col_boundaries(
-        rows[header_row] if header_row < len(rows) else [],
+        hdr_blocks,
         num_cols,
         raw_blocks,
         col_boundaries,
@@ -189,15 +232,25 @@ def build_table(
         table_rows.append(row_texts)
         table_scores.append(row_scores)
 
-    headers = table_rows[header_row] if header_row < len(table_rows) else [""] * num_cols
-    data = [row for i, row in enumerate(table_rows) if i != header_row]
+    if n_header > 1:
+        headers = [
+            _merge_header_cells(table_rows, c, n_header) for c in range(num_cols)
+        ]
+        data = table_rows[n_header:] if len(table_rows) > n_header else []
+    else:
+        headers = (
+            table_rows[header_row] if header_row < len(table_rows) else [""] * num_cols
+        )
+        data = [row for i, row in enumerate(table_rows) if i != header_row]
 
     return {
         "cols": num_cols,
         "header_row": header_row,
+        "header_rows": n_header,
         "row_count": len(data),
         "headers": headers,
         "data": data,
+        "all_rows": table_rows,
         "cells": cells,
         "col_boundaries": [round(x, 2) for x in boundaries],
     }

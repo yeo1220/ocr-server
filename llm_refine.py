@@ -36,20 +36,20 @@ def _extract_json(text: str) -> dict | None:
     return None
 
 
-def _row_to_data_index(row: int, header_row: int) -> int | None:
-    if row == header_row:
+def _row_to_data_index(row: int, header_rows: int) -> int | None:
+    if row < header_rows:
         return None
-    return row if row < header_row else row - 1
+    return row - header_rows
 
 
 def _low_confidence_cells(
     table: dict[str, Any],
     threshold: float,
-    header_row: int,
+    header_rows: int,
 ) -> list[dict]:
     fix: list[dict] = []
     for cell in table.get("cells") or []:
-        if int(cell.get("row", -1)) == header_row:
+        if int(cell.get("row", -1)) < header_rows:
             continue
         score = float(cell.get("score") or 0.0)
         text = str(cell.get("text") or "").strip()
@@ -100,7 +100,7 @@ async def apply_refined_to_table(
     table: dict[str, Any],
     refined_data: list[list[str]],
 ) -> dict[str, Any]:
-    header_row = int(table.get("header_row", 0))
+    header_rows = int(table.get("header_rows", 1))
     num_cols = int(table["cols"])
     original_data = table.get("data") or []
 
@@ -118,7 +118,7 @@ async def apply_refined_to_table(
         text_refined = text
         refined_flag = False
 
-        d_idx = _row_to_data_index(r, header_row)
+        d_idx = _row_to_data_index(r, header_rows)
         if d_idx is not None and 0 <= d_idx < len(refined_data) and c < num_cols:
             text_refined = refined_data[d_idx][c]
             refined_flag = text_refined != text
@@ -157,7 +157,7 @@ async def refine_table(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Refine low-confidence data cells via vLLM. Returns (table, refinement_meta)."""
     threshold = threshold if threshold is not None else settings.vllm_refine_threshold
-    header_row = int(table.get("header_row", 0))
+    header_rows = int(table.get("header_rows", 1))
     headers = list(table.get("headers") or [])
     data = [list(row) for row in table.get("data") or []]
     num_cols = int(table["cols"])
@@ -173,7 +173,7 @@ async def refine_table(
         "error": None,
     }
 
-    fix_cells = _low_confidence_cells(table, threshold, header_row)
+    fix_cells = _low_confidence_cells(table, threshold, header_rows)
     if not fix_cells:
         meta["skipped"] = True
         meta["skip_reason"] = "no_low_confidence_cells"

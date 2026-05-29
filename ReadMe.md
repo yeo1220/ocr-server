@@ -6,7 +6,7 @@ PaddleOCR PP-OCRv5(한국어) + 문서 보정(회전/왜곡) + GPU 추론을 Fas
 ## 주요 기능
 
 - PDF / 이미지 OCR (한국어, PP-OCRv5)
-- 스캔 PDF용 고해상도 렌더링 (기본 300 DPI, 병렬 처리)
+- 스캔 PDF용 고해상도 렌더링 (기본 400 DPI, 병렬 처리)
 - 스캔본 전처리 (노이즈 제거, adaptive threshold)
 - 문서 방향 보정 및 왜곡 보정
 - GB10 GPU 추론 (미지원 시 CPU 자동 fallback)
@@ -133,7 +133,9 @@ curl http://localhost:8001/health
   "status": "ok",
   "device": "gpu:0",
   "paddle_cuda": true,
-  "ocr_dpi_default": 300,
+  "ocr_dpi_default": 400,
+  "ocr_det_limit_side_len": 2560,
+  "ocr_preprocess_mode": "enhance",
   "ocr_workers": 8
 }
 ```
@@ -146,13 +148,14 @@ PDF 또는 이미지 OCR
 |----------|------|--------|------|
 | `file` | file | (필수) | PDF 또는 이미지 파일 |
 | `mode` | string | `scan` | `scan`: 전처리 적용, `raw`: 원본 그대로 |
-| `dpi` | int | `300` | PDF 렌더 해상도 (PDF만 해당) |
+| `dpi` | int | `400` | PDF 렌더 해상도 (PDF만 해당) |
+| `preprocess` | string | `enhance` | `scan` 모드 전처리: `enhance`(권장), `binary`, `none` |
 
 ```bash
 # 스캔 PDF (권장)
 curl -F "file=@document.pdf" \
      -F "mode=scan" \
-     -F "dpi=300" \
+     -F "dpi=400" \
      http://localhost:8001/ocr
 
 # 원본 이미지 (전처리 없음)
@@ -201,11 +204,18 @@ curl -F "file=@scan.png" \
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
 | `OCR_DEVICE` | `gpu:0` | 추론 디바이스 (`gpu:0`, `cpu`) |
-| `OCR_DPI` | `300` | PDF 렌더 DPI |
+| `OCR_DPI` | `400` | PDF 렌더 DPI (DGX 품질 기본값) |
 | `OCR_WORKERS` | `8` | PDF 페이지 병렬 렌더 스레드 수 |
 | `OCR_CPU_THREADS` | `20` | CPU fallback 시 Paddle 스레드 수 |
-| `OCR_DET_LIMIT_SIDE_LEN` | `960` | 텍스트 검출 최대 변 길이 |
-| `OCR_MAX_PAGE_PIXELS` | `25000000` | 페이지당 최대 픽셀 (메모리 보호) |
+| `OCR_DET_LIMIT_SIDE_LEN` | `2560` | 검출 리사이즈 상한 (클수록 소문자·표 인식 향상) |
+| `OCR_DET_LIMIT_TYPE` | `max` | 검출 리사이즈 방식 (`max` / `min` / `resize_long`) |
+| `OCR_TEXT_DET_THRESH` | `0.25` | 텍스트 검출 임계값 (낮을수록 희미한 글자 검출) |
+| `OCR_TEXT_DET_BOX_THRESH` | `0.5` | 박스 필터 임계값 |
+| `OCR_TEXT_DET_UNCLIP_RATIO` | `1.8` | 검출 박스 확장 비율 |
+| `OCR_REC_BATCH_SIZE` | `16` | GPU 인식 배치 크기 |
+| `OCR_MAX_PAGE_PIXELS` | `60000000` | 페이지당 최대 픽셀 (메모리 보호) |
+| `OCR_MIN_SIDE_FOR_DET` | `2000` | 짧은 변이 이보다 작으면 OCR 전 업스케일 |
+| `OCR_PREPROCESS_MODE` | `enhance` | 기본 전처리 (`enhance` / `binary` / `none`) |
 | `OCR_UPLOAD_DIR` | `/tmp/ocr_uploads` | 업로드 파일 보관 디렉터리 |
 | `OCR_PAGE_DIR` | `/tmp/ocr_pages` | PDF 렌더/전처리 이미지 디렉터리 |
 | `OCR_RESULT_DIR` | `/tmp/ocr_results` | OCR 결과 JSON 저장 디렉터리 |
@@ -217,9 +227,9 @@ curl -F "file=@scan.png" \
 ```
 PDF/이미지 업로드
     ↓
-PDF → PNG (300 DPI, 병렬 렌더)
+PDF → PNG (400 DPI, 병렬 렌더)
     ↓
-[mode=scan] 노이즈 제거 + 이진화
+[mode=scan] CLAHE·노이즈 제거·기울기 보정 (컬러, 이진화 없음)
     ↓
 PaddleOCR (방향 보정 + 왜곡 보정 + PP-OCRv5 한국어)
     ↓

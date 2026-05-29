@@ -2,7 +2,7 @@
 
 import unittest
 
-from table_builder import build_table, table_to_text
+from table_builder import build_table, export_table_aliases, table_to_text
 
 
 def _block(text: str, x0: float, y0: float, x1: float, y1: float, score: float = 0.95):
@@ -52,6 +52,39 @@ class TableBuilderTests(unittest.TestCase):
         )
         self.assertEqual(table["headers"], ["H1", "H2"])
         self.assertEqual(table["data"], [["a", "b"]])
+
+    def test_two_row_headers(self):
+        """재결서 2단 헤더: 상단·하단 행을 열별로 병합한다."""
+        blocks = [
+            _block("구분지상권", 0, 0, 80, 18),
+            _block("보상액", 200, 0, 280, 18),
+            _block("소재지", 0, 22, 80, 40),
+            _block("단가", 200, 22, 280, 40),
+            _block("경기도", 0, 50, 80, 68),
+            _block("1000", 200, 50, 280, 68),
+        ]
+        table = build_table(blocks, num_cols=2, header_rows=2)
+        self.assertEqual(table["header_rows"], 2)
+        self.assertEqual(len(table["data"]), 1)
+        self.assertEqual(table["headers"][0], "구분지상권 소재지")
+        self.assertEqual(table["headers"][1], "보상액 단가")
+        self.assertEqual(len(table["all_rows"]), 3)
+
+    def test_export_table_aliases(self):
+        table = build_table(
+            [
+                _block("A", 0, 0, 40, 20),
+                _block("B", 60, 0, 100, 20),
+                _block("1", 0, 40, 40, 60),
+                _block("2", 60, 40, 100, 60),
+            ],
+            num_cols=2,
+            header_rows=1,
+        )
+        table["data_refined"] = [["1x", "2x"]]
+        export_table_aliases(table)
+        self.assertEqual(len(table["rows"]), 2)
+        self.assertEqual(table["rows_refined"], [["A", "B"], ["1x", "2x"]])
 
 
 if __name__ == "__main__":

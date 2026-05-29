@@ -13,7 +13,7 @@ from llm_refine import check_vllm_reachable, refine_table
 from ocr_engine import get_active_device, get_ocr, run_ocr_image, warmup
 from pdf_utils import pdf_to_images
 from preprocess import preprocess_for_ocr
-from table_builder import build_table, table_to_text
+from table_builder import build_table, export_table_aliases, table_to_text
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -44,6 +44,10 @@ async def health():
         "paddle_cuda": paddle.is_compiled_with_cuda(),
         "ocr_dpi_default": settings.ocr_dpi,
         "ocr_workers": settings.ocr_workers,
+        "ocr_det_limit_side_len": settings.text_det_limit_side_len,
+        "ocr_preprocess_mode": settings.preprocess_mode,
+        "ocr_refine_default": settings.ocr_refine_default,
+        "ocr_max_page_pixels": settings.max_page_pixels,
         "vllm_enabled": settings.vllm_enabled,
         "vllm_reachable": await check_vllm_reachable(),
         "vllm_model": settings.vllm_model,
@@ -72,12 +76,14 @@ def _parse_col_boundaries(raw: str | None) -> list[float] | None:
 async def ocr_endpoint(
     file: UploadFile = File(...),
     mode: str = Form("scan"),
+    preprocess: str = Form(None),
     dpi: int = Form(None),
     format: str = Form("text"),
     table_cols: int = Form(None),
     table_header_row: int = Form(0),
+    table_header_rows: int = Form(1),
     table_col_boundaries: str = Form(None),
-    refine: str = Form("none"),
+    refine: str = Form(None),
     refine_threshold: float = Form(None),
 ):
     start = time.time()
@@ -86,6 +92,16 @@ async def ocr_endpoint(
     ext = os.path.splitext(filename)[1].lower()
     render_dpi = dpi if dpi is not None else settings.ocr_dpi
     preprocessed = mode == "scan"
+    preprocess_mode = (
+        preprocess.strip().lower()
+        if preprocess and preprocess.strip()
+        else settings.preprocess_mode
+    )
+    if preprocess_mode not in ("enhance", "binary", "none"):
+        raise HTTPException(
+            status_code=422,
+            detail="preprocess must be 'enhance', 'binary', or 'none'",
+        )
     table_mode = format.lower() == "table"
     col_boundaries = _parse_col_boundaries(table_col_boundaries)
 
@@ -94,13 +110,23 @@ async def ocr_endpoint(
             status_code=422,
             detail="format=table requires table_cols (positive integer)",
         )
+    if table_header_rows < 1:
+        raise HTTPException(
+            status_code=422,
+            detail="table_header_rows must be >= 1",
+        )
 
-    if refine.lower() not in ("none", "vllm"):
+    refine_mode = (
+        refine.strip().lower()
+        if refine and refine.strip()
+        else settings.ocr_refine_default
+    )
+    if refine_mode not in ("none", "vllm"):
         raise HTTPException(
             status_code=422,
             detail="refine must be 'none' or 'vllm'",
         )
-    use_vllm = refine.lower() == "vllm"
+    use_vllm = refine_mode == "vllm"
     threshold = (
         refine_threshold
         if refine_threshold is not None
@@ -128,7 +154,9 @@ async def ocr_endpoint(
             preprocessed_path = os.path.join(
                 settings.page_dir, f"{job_id}_{idx}_pre.png"
             )
-            preprocess_for_ocr(image_path, preprocessed_path)
+            preprocess_for_ocr(
+                image_path, preprocessed_path, mode=preprocess_mode
+            )
             ocr_input = preprocessed_path
             page_image_paths.append(preprocessed_path)
 
@@ -137,6 +165,7 @@ async def ocr_endpoint(
             "page": idx,
             "text": result["text"],
             "blocks": result["blocks"],
+            "raw_blocks": result["raw_blocks"],
             "avg_score": result["avg_score"],
         }
 
@@ -145,6 +174,7 @@ async def ocr_endpoint(
                 result["raw_blocks"],
                 num_cols=table_cols,
                 header_row=table_header_row,
+                header_rows=table_header_rows,
                 col_boundaries=col_boundaries,
             )
             refinement_meta = None
@@ -158,6 +188,7 @@ async def ocr_endpoint(
                     cell["text_refined"] = cell.get("text", "")
                     cell["refined"] = False
 
+            export_table_aliases(table)
             page_payload["table"] = table
             page_payload["refinement"] = refinement_meta
             page_payload["text"] = table_to_text(table)
@@ -178,6 +209,7 @@ async def ocr_endpoint(
         "dpi": render_dpi,
         "device": get_active_device(),
         "preprocessed": preprocessed,
+        "preprocess_mode": preprocess_mode if preprocessed else None,
         "processing_time_sec": elapsed,
         "page_count": len(page_results),
         "text": "\n\n".join(full_text_parts),
@@ -189,7 +221,8 @@ async def ocr_endpoint(
     if table_mode:
         response["table_cols"] = table_cols
         response["table_header_row"] = table_header_row
-        response["refine"] = refine
+        response["table_header_rows"] = table_header_rows
+        response["refine"] = refine_mode
 
     with open(response["result_path"], "w", encoding="utf-8") as f:
         json.dump(response, f, ensure_ascii=False, indent=2)

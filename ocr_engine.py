@@ -6,6 +6,7 @@ import tempfile
 from collections.abc import Mapping
 from typing import Any
 
+import cv2
 import paddle
 from paddleocr import PaddleOCR
 
@@ -187,13 +188,54 @@ def _build_ocr(device: str) -> PaddleOCR:
     return PaddleOCR(
         lang="korean",
         ocr_version="PP-OCRv5",
+        text_detection_model_name="PP-OCRv5_server_det",
+        text_recognition_model_name="korean_PP-OCRv5_mobile_rec",
         device=device,
         cpu_threads=settings.cpu_threads,
         use_doc_orientation_classify=True,
         use_doc_unwarping=True,
         use_textline_orientation=True,
         text_det_limit_side_len=settings.text_det_limit_side_len,
+        text_det_limit_type=settings.text_det_limit_type,
+        text_det_thresh=settings.text_det_thresh,
+        text_det_box_thresh=settings.text_det_box_thresh,
+        text_det_unclip_ratio=settings.text_det_unclip_ratio,
+        text_recognition_batch_size=settings.text_recognition_batch_size,
+        text_rec_score_thresh=settings.text_rec_score_thresh,
     )
+
+
+def _prepare_image_for_ocr(image_path: str) -> tuple[str, bool]:
+    """Upscale low-resolution pages so small Hangul remains detectable."""
+    image = cv2.imread(image_path)
+    if image is None:
+        return image_path, False
+
+    h, w = image.shape[:2]
+    min_side = min(h, w)
+    target = settings.ocr_min_side_for_det
+    if min_side >= target:
+        return image_path, False
+
+    scale = min(settings.ocr_max_upscale, target / min_side)
+    if scale <= 1.01:
+        return image_path, False
+
+    new_w = int(w * scale)
+    new_h = int(h * scale)
+    upscaled = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+    fd, tmp_path = tempfile.mkstemp(suffix=".png", prefix="ocr_upscale_")
+    os.close(fd)
+    cv2.imwrite(tmp_path, upscaled)
+    logger.debug(
+        "Upscaled OCR input %dx%d -> %dx%d (scale=%.2f)",
+        w,
+        h,
+        new_w,
+        new_h,
+        scale,
+    )
+    return tmp_path, True
 
 
 def _init_ocr(device: str) -> PaddleOCR:
@@ -252,14 +294,22 @@ def warmup() -> None:
 
 
 def run_ocr_image(image_path: str) -> dict:
+    ocr_input, is_temp = _prepare_image_for_ocr(image_path)
     try:
-        result = get_ocr().predict(image_path)
-    except Exception as e:
-        if _active_device.startswith("gpu") and _is_cudnn_error(e):
-            _fallback_to_cpu(str(e))
-            result = get_ocr().predict(image_path)
-        else:
-            raise
+        try:
+            result = get_ocr().predict(ocr_input)
+        except Exception as e:
+            if _active_device.startswith("gpu") and _is_cudnn_error(e):
+                _fallback_to_cpu(str(e))
+                result = get_ocr().predict(ocr_input)
+            else:
+                raise
+    finally:
+        if is_temp:
+            try:
+                os.unlink(ocr_input)
+            except OSError:
+                pass
 
     lines: list[str] = []
     blocks: list[dict] = []

@@ -126,6 +126,45 @@ requests>=2.31.0
 | `file` | O | file | — | PDF 또는 이미지 (`.pdf`, `.png`, `.jpg`, `.jpeg`, `.tiff` 등) |
 | `mode` | X | string | `scan` | `scan`: 스캔본 전처리 + 문서 보정, `raw`: 원본 그대로 |
 | `dpi` | X | int | `300` | PDF 렌더 해상도 (PDF만 해당) |
+| `format` | X | string | `text` | `table`: 고정 열 표 JSON (`table_cols` 필수) |
+| `table_cols` | X* | int | — | `format=table`일 때 열 개수 (재결서 보상금내역: `9`) |
+| `table_header_row` | X | int | `0` | 단일 헤더 행 인덱스 (레거시, `header_rows=1`일 때) |
+| `table_header_rows` | X | int | `1` | 헤더로 볼 행 수 (재결서 2단 헤더: `2`) |
+| `table_col_boundaries` | X | string | — | 열 경계 X좌표 JSON 배열 (예: `[0,75,150,...]`) |
+| `refine` | X | string | 서버 기본 | `none` \| `vllm` (저신뢰 셀 LLM 보정) |
+| `refine_threshold` | X | float | 서버 기본 | vLLM 보정 대상 신뢰도 상한 (예: `0.85`) |
+
+\* `format=table`이면 `table_cols` 필수.
+
+**재결서 Celery(`decision_tasks`) 권장 요청 예시:**
+
+```python
+data = {
+    "mode": "raw",
+    "dpi": "400",
+    "format": "table",
+    "table_cols": "9",
+    "table_header_row": "0",
+    "table_header_rows": "2",
+    "refine": "vllm",
+    "refine_threshold": "0.85",
+}
+requests.post(f"{OCR_API_BASE_URL}/ocr", files={"file": (...)} , data=data, timeout=(5, 300))
+```
+
+**`format=table` 페이지 응답 (Django 파서 호환):**
+
+| 필드 | 설명 |
+|------|------|
+| `pages[].raw_blocks` | 병합 전 OCR 블록 (좌표 기반 표 복원에 우선 사용) |
+| `pages[].blocks` | 줄 단위 병합 블록 |
+| `pages[].table.headers` | 헤더 행(2단이면 상·하 병합) |
+| `pages[].table.data` | 데이터 행만 |
+| `pages[].table.data_refined` | vLLM 보정 후 데이터 행 |
+| `pages[].table.rows` | 헤더+데이터 전체 격자 (`all_rows`, Django `len==10` 분기용) |
+| `pages[].table.rows_refined` | 헤더+보정 데이터 격자 |
+
+Django는 `data_refined` → `rows_refined` → `data` → `rows` 순으로 표 행을 읽습니다.
 
 **성공 응답 (HTTP 200):**
 

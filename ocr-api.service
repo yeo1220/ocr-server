@@ -8,9 +8,19 @@ User=wslaw
 WorkingDirectory=/home/wslaw/ocr-server
 # env.sh(선택) + cuDNN 경로 — env.sh 미적용 시에도 GPU가 동작하도록 기본값 고정
 Environment=OCR_DEVICE=gpu:0
-Environment=OCR_DPI=300
+Environment=OCR_DPI=400
 Environment=OCR_WORKERS=8
 Environment=OCR_CPU_THREADS=20
+Environment=OCR_DET_LIMIT_SIDE_LEN=2560
+Environment=OCR_DET_LIMIT_TYPE=max
+Environment=OCR_TEXT_DET_THRESH=0.25
+Environment=OCR_TEXT_DET_BOX_THRESH=0.5
+Environment=OCR_TEXT_DET_UNCLIP_RATIO=1.8
+Environment=OCR_REC_BATCH_SIZE=16
+Environment=OCR_MAX_PAGE_PIXELS=60000000
+Environment=OCR_MIN_SIDE_FOR_DET=2000
+Environment=OCR_PREPROCESS_MODE=enhance
+Environment=OCR_REFINE_DEFAULT=vllm
 Environment=CUDA_VISIBLE_DEVICES=0
 Environment=LD_LIBRARY_PATH=/home/wslaw/local/cudnn/usr/lib/aarch64-linux-gnu
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
