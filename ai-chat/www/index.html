@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Chat — Qwen3 Next 80B</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2d3a4f;
+      --text: #e7ecf3;
+      --muted: #8b9cb3;
+      --accent: #3b82f6;
+      --user: #1e3a5f;
+      --assistant: #1a2e1a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Pretendard", "Noto Sans KR", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    header h1 { margin: 0; font-size: 1.1rem; font-weight: 600; }
+    header .meta { font-size: 0.8rem; color: var(--muted); }
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .msg {
+      max-width: 85%;
+      padding: 12px 16px;
+      border-radius: 12px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .msg.user { align-self: flex-end; background: var(--user); }
+    .msg.assistant { align-self: flex-start; background: var(--assistant); border: 1px solid var(--border); }
+    .msg.error { align-self: center; background: #3d1f1f; color: #fca5a5; max-width: 95%; }
+    .msg.thinking { opacity: 0.7; font-style: italic; }
+    footer {
+      padding: 14px 20px;
+      border-top: 1px solid var(--border);
+      background: var(--panel);
+      display: flex;
+      gap: 10px;
+    }
+    textarea {
+      flex: 1;
+      resize: none;
+      min-height: 48px;
+      max-height: 160px;
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      font: inherit;
+    }
+    button {
+      padding: 0 20px;
+      border: none;
+      border-radius: 10px;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    select {
+      padding: 6px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 0.85rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>AI Chat</h1>
+      <div class="meta" id="model-info">모델 로딩 중…</div>
+    </div>
+    <select id="model-select" aria-label="모델 선택"></select>
+  </header>
+  <main id="messages"></main>
+  <footer>
+    <textarea id="input" rows="2" placeholder="메시지를 입력하세요… (Enter 전송, Shift+Enter 줄바꿈)"></textarea>
+    <button id="send" type="button">전송</button>
+  </footer>
+  <script>
+    const API_BASE = window.location.origin + "/v1";
+    const API_KEY = "local";
+    const messagesEl = document.getElementById("messages");
+    const inputEl = document.getElementById("input");
+    const sendBtn = document.getElementById("send");
+    const modelSelect = document.getElementById("model-select");
+    const modelInfo = document.getElementById("model-info");
+
+    let history = [];
+    let defaultModel = "qwen-ocr";
+    let busy = false;
+
+    function addMessage(role, text, extraClass = "") {
+      const div = document.createElement("div");
+      div.className = "msg " + role + (extraClass ? " " + extraClass : "");
+      div.textContent = text;
+      messagesEl.appendChild(div);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      return div;
+    }
+
+    async function loadModels() {
+      try {
+        const res = await fetch(API_BASE + "/models", {
+          headers: { Authorization: "Bearer " + API_KEY },
+        });
+        if (!res.ok) throw new Error(res.status + " " + res.statusText);
+        const data = await res.json();
+        modelSelect.innerHTML = "";
+        for (const m of data.data || []) {
+          const opt = document.createElement("option");
+          opt.value = m.id;
+          opt.textContent = m.id;
+          modelSelect.appendChild(opt);
+        }
+        if (modelSelect.options.length) {
+          defaultModel = modelSelect.options[0].value;
+          modelSelect.value = defaultModel;
+        }
+        modelInfo.textContent =
+          "OpenAI API: " + API_BASE + " · 모델: " + defaultModel;
+      } catch (e) {
+        modelInfo.textContent = "백엔드 연결 대기 중… (" + e.message + ")";
+        setTimeout(loadModels, 5000);
+      }
+    }
+
+    async function sendMessage() {
+      const text = inputEl.value.trim();
+      if (!text || busy) return;
+      busy = true;
+      sendBtn.disabled = true;
+      inputEl.value = "";
+
+      addMessage("user", text);
+      history.push({ role: "user", content: text });
+
+      const assistantEl = addMessage("assistant", "…", "thinking");
+      const model = modelSelect.value || defaultModel;
+
+      try {
+        const res = await fetch(API_BASE + "/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer " + API_KEY,
+          },
+          body: JSON.stringify({
+            model,
+            messages: history,
+            stream: true,
+            max_tokens: 4096,
+            temperature: 0.7,
+          }),
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(res.status + ": " + errText.slice(0, 500));
+        }
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let full = "";
+        assistantEl.textContent = "";
+        assistantEl.classList.remove("thinking");
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
+          for (const line of chunk.split("\n")) {
+            if (!line.startsWith("data: ")) continue;
+            const payload = line.slice(6).trim();
+            if (payload === "[DONE]") continue;
+            try {
+              const json = JSON.parse(payload);
+              const delta = json.choices?.[0]?.delta?.content;
+              if (delta) {
+                full += delta;
+                assistantEl.textContent = full;
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+              }
+            } catch (_) {}
+          }
+        }
+
+        if (!full) assistantEl.textContent = "(빈 응답)";
+        history.push({ role: "assistant", content: full });
+      } catch (e) {
+        assistantEl.remove();
+        addMessage("error", "오류: " + e.message);
+        history.pop();
+      } finally {
+        busy = false;
+        sendBtn.disabled = false;
+        inputEl.focus();
+      }
+    }
+
+    sendBtn.addEventListener("click", sendMessage);
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+    modelSelect.addEventListener("change", () => {
+      defaultModel = modelSelect.value;
+      modelInfo.textContent =
+        "OpenAI API: " + API_BASE + " · 모델: " + defaultModel;
+    });
+
+    loadModels();
+    addMessage(
+      "assistant",
+      "안녕하세요. DGX Spark에서 실행 중인 Qwen3-Next-80B-A3B-Thinking-FP8 모델입니다.\n한국어·영어 대화와 추론 작업에 적합합니다."
+    );
+  </script>
+</body>
+</html>
