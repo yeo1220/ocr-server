@@ -11,7 +11,9 @@ token-bound and collapses dense tables.
 """
 
 import asyncio
+import json
 import logging
+import os
 import re
 
 from bs4 import BeautifulSoup
@@ -19,6 +21,11 @@ from bs4 import BeautifulSoup
 from config import settings
 
 logger = logging.getLogger(__name__)
+
+# gemma-chat 단일 모델로 OCR 텍스트 교정(refine)을 수행할지 여부.
+# 추출은 PaddleOCR-VL(정확)이 담당하고, gemma는 한글 오인식만 가드 하에 보정한다.
+_REFINE_ENABLED = os.getenv("PADDLE_VL_REFINE", "false").lower() in ("1", "true", "yes")
+_DIGITS_ONLY = re.compile(r"\D")
 
 _PIPELINE = None
 _PREDICT_LOCK = asyncio.Lock()
@@ -212,6 +219,118 @@ def _build_table_dict(headers, data, num_cols, header_rows):
     return table
 
 
+_REFINE_SYSTEM = (
+    "You correct Korean OCR misreadings in a land-compensation table (보상금내역). "
+    "You output STRICT JSON only, with no commentary."
+)
+
+_REFINE_USER_TMPL = (
+    "Below is a JSON table extracted from a scanned Korean document by OCR.\n"
+    "Fix ONLY clear Korean text misrecognitions in descriptive cells "
+    "(for example '지방성도' -> '지방상권', '평균매수엔' -> '평균매수액').\n"
+    "STRICT RULES:\n"
+    "- NEVER change any digit, amount, unit price, area, ratio, or parenthetical ID "
+    "such as (101-1703). Copy all numbers exactly.\n"
+    "- NEVER change personal names or addresses unless an obvious single-character "
+    "OCR slip; when unsure, keep the original.\n"
+    "- Keep EXACTLY the same number of rows, and the same number of columns per row.\n"
+    "- Keep empty strings empty; never add or delete rows.\n"
+    "- Preserve newline characters inside cells.\n"
+    'Return JSON of the form {"data": [["cell", ...], ...]} with identical shape.\n\n'
+)
+
+
+async def _refine_table_with_gemma(headers, data, num_cols):
+    """Guarded gemma-chat correction of OCR text garbles.
+
+    Protects data integrity: any cell whose digit sequence changes is reverted to
+    the original, and a shape/row-count mismatch rejects the whole refine. This
+    lets the single gemma-chat model improve descriptive text without risking the
+    legally/financially significant numbers, IDs, names that PaddleOCR-VL already
+    captured accurately.
+    """
+    if not data:
+        return [list(r) for r in data]
+
+    import httpx
+
+    from vllm_client import check_chat_reachable, extract_json_object
+
+    fallback = [list(r) for r in data]
+    if not await check_chat_reachable():
+        logger.info("paddle_vl refine skipped: chat (gemma) unreachable")
+        return fallback
+
+    user = _REFINE_USER_TMPL + json.dumps(
+        {"headers": headers, "data": data}, ensure_ascii=False
+    )
+    base = settings.vllm_base_url.rstrip("/")
+    payload = {
+        "model": settings.vllm_model,
+        "messages": [
+            {"role": "system", "content": _REFINE_SYSTEM},
+            {"role": "user", "content": user},
+        ],
+        "temperature": 0.0,
+        "max_tokens": 4096,
+        "response_format": {"type": "json_object"},
+    }
+    timeout = float(getattr(settings, "vllm_vl_timeout", 240) or 240)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.post(
+                f"{base}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.vllm_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            r.raise_for_status()
+            content = (
+                r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+            )
+    except Exception as exc:  # network/model errors must not break OCR
+        logger.warning("paddle_vl gemma refine call failed: %r", exc)
+        return fallback
+
+    obj = extract_json_object(content)
+    new = obj.get("data") if isinstance(obj, dict) else None
+    if not isinstance(new, list) or len(new) != len(data):
+        logger.warning(
+            "paddle_vl gemma refine rejected (row count %s != %s)",
+            len(new) if isinstance(new, list) else None,
+            len(data),
+        )
+        return fallback
+
+    out = []
+    changed = 0
+    for orig_row, new_row in zip(data, new):
+        if not isinstance(new_row, list) or len(new_row) != len(orig_row):
+            logger.warning("paddle_vl gemma refine rejected (column shape mismatch)")
+            return fallback
+        fixed = []
+        for o, n in zip(orig_row, new_row):
+            o = "" if o is None else str(o)
+            n = "" if n is None else str(n)
+            # Keep the original cell when:
+            #  - any digit changed (protects 금액·단가·면적·ID), or
+            #  - the cell carries a parenthetical token like (101-1703)
+            #    which marks owner names / unit IDs we must never rewrite.
+            if _DIGITS_ONLY.sub("", o) != _DIGITS_ONLY.sub("", n) or (
+                "(" in o or ")" in o
+            ):
+                fixed.append(o)
+            else:
+                if n != o:
+                    changed += 1
+                fixed.append(n)
+        out.append(fixed)
+    logger.info("paddle_vl gemma refine applied: %s cell(s) corrected", changed)
+    return out
+
+
 async def run_paddle_vl_page(image_path, *, table_mode, num_cols, header_rows):
     pipe = get_pipeline()
 
@@ -233,7 +352,12 @@ async def run_paddle_vl_page(image_path, *, table_mode, num_cols, header_rows):
         data = _merge_record_rows(data, num_cols)
         table = _build_table_dict(headers, data, num_cols, header_rows)
         export_table_aliases(table)
-        table["data_refined"] = [list(r) for r in table.get("data") or []]
+        if _REFINE_ENABLED:
+            table["data_refined"] = await _refine_table_with_gemma(
+                table["headers"], table["data"], num_cols
+            )
+        else:
+            table["data_refined"] = [list(r) for r in table.get("data") or []]
         for cell in table.get("cells") or []:
             cell["text_refined"] = cell.get("text", "")
             cell["refined"] = False

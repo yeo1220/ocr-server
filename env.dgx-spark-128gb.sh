@@ -36,3 +36,6 @@ export VLLM_REFINE_FALLBACK_TO_CHAT="${VLLM_REFINE_FALLBACK_TO_CHAT:-false}"
 
 # OCR-VL 백엔드: PaddleOCR-VL(레이아웃+0.9B) 인프로세스 파이프라인 (DGX Spark 권장)
 export VL_OCR_OUTPUT_MODE="${VL_OCR_OUTPUT_MODE:-paddle_vl}"
+
+# gemma-chat 단일 모델로 OCR 텍스트 교정 활성화(추출=PaddleOCR-VL, 교정=gemma, 숫자/ID 가드)
+export PADDLE_VL_REFINE="${PADDLE_VL_REFINE:-false}"
