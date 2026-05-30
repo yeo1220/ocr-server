@@ -15,8 +15,8 @@ if [[ -f .env ]]; then
   set +a
 fi
 
-MODEL_ID="${VL_HF_MODEL:-Qwen/Qwen2.5-VL-32B-Instruct-AWQ}"
-DIR_NAME="${VL_MODEL_DIR:-Qwen2.5-VL-32B-Instruct-AWQ}"
+MODEL_ID="${VL_HF_MODEL}"
+DIR_NAME="${VL_MODEL_DIR}"
 DEST="models/${DIR_NAME}"
 
 if [[ -f "${DEST}/config.json" ]]; then
@@ -26,7 +26,7 @@ fi
 
 mkdir -p models
 echo "Downloading ${MODEL_ID} -> ${DEST}"
-echo "한글 재결서·표 OCR 권장. OOM 시 32B: VL_HF_MODEL=Qwen/Qwen2.5-VL-32B-Instruct-AWQ"
+echo "한글 재결서·표 OCR 권장. OOM 시 32B: VL_HF_MODEL=${VL_HF_MODEL}"
 
 HF_TOKEN_ARGS=()
 if [[ -n "${HF_TOKEN:-}" ]]; then

@@ -328,6 +328,8 @@ def get_vl_base_url() -> str:
 
 
 async def check_vl_reachable() -> bool:
+    if getattr(settings, "vl_output_mode", "") == "paddle_vl":
+        return True
     if not settings.vllm_enabled:
         return False
     return await _reachable_at(settings.vllm_vl_base_url)
@@ -338,6 +340,7 @@ async def chat_vision_json(
     *,
     max_tokens: int | None = None,
     profile: VllmModelProfile | None = None,
+    json_mode: bool = True,
 ) -> tuple[str, dict[str, Any]]:
     """Vision chat/completions for page-image OCR."""
     prof = profile or _vl_profile
@@ -352,8 +355,9 @@ async def chat_vision_json(
         "messages": messages,
         "temperature": prof.temperature,
         "max_tokens": limit,
-        "response_format": {"type": "json_object"},
     }
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
     payload.update(prof.extra_body)
 
     async with _vl_client() as client:

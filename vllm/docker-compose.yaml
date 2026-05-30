@@ -1,4 +1,4 @@
-# DGX Spark 128GB: Gemma 4 chat (:8000) + Qwen2.5-VL-32B-AWQ OCR (:8003).
+# DGX Spark 128GB: Gemma 4 chat (:8000) + VARCO-VISION-1.7B OCR (:8003).
 # Image: ghcr.io/timothystewart6/vllm-gb10:v0.20.1-gb10.0
 #   (vLLM v0.20.1, CUDA 13.2 / PyTorch 2.11, ARM64 native, GB10 sm_121a 전용 빌드 · upstream 추적 · 불변 핀 태그).
 #   entrypoint가 없으므로 command는 'vllm serve <model>' 형식으로 시작해야 함.
@@ -41,14 +41,18 @@ services:
       vllm serve /models/${CHAT_MODEL_DIR:-gemma-4-26b-a4b-it}
       --served-model-name gemma-chat
       --host 0.0.0.0 --port 8000
-      --gpu-memory-utilization ${CHAT_GPU_MEMORY_UTIL:-0.28}
+      --gpu-memory-utilization ${CHAT_GPU_MEMORY_UTIL:-0.50}
       --max-model-len ${CHAT_MAX_MODEL_LEN:-8192}
       --max-num-batched-tokens ${CHAT_MAX_NUM_BATCHED_TOKENS:-4096}
+      --enable-auto-tool-choice
+      --tool-call-parser hermes
       --trust-remote-code
 
   vllm-ocr-vl:
     image: ghcr.io/timothystewart6/vllm-gb10:v0.20.1-gb10.0
     container_name: vllm-qwen-vl-ocr
+    profiles:
+      - vl
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - HF_HOME=/root/.cache/huggingface
@@ -79,7 +83,7 @@ services:
       start_period: 900s
     restart: unless-stopped
     command: >
-      vllm serve /models/${VL_MODEL_DIR:-VARCO-VISION-2.0-14B}
+      vllm serve /models/${VL_MODEL_DIR}
       --served-model-name qwen-vl-ocr
       --host 0.0.0.0 --port 8003
       --gpu-memory-utilization ${VL_GPU_MEMORY_UTIL:-0.60}

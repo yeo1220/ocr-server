@@ -46,6 +46,11 @@ class Settings:
     vllm_vl_max_tokens: int = _env_int("VLLM_VL_MAX_TOKENS", 8192)
     vllm_vl_timeout: float = _env_float("VLLM_VL_TIMEOUT", 180.0)
     vllm_vl_max_image_side: int = _env_int("VLLM_VL_MAX_IMAGE_SIDE", 2048)
+    # char_bbox: OCR-specialized model (<ocr> -> <char>/<bbox>) + geometric table builder.
+    # json_table: instruction-following VLM returning {"table": {...}} JSON.
+    vl_output_mode: str = os.getenv("VL_OCR_OUTPUT_MODE", "paddle_vl").lower()
+    vllm_vl_ocr_image_side: int = _env_int("VLLM_VL_OCR_IMAGE_SIDE", 2304)
+    paddle_vl_version: str = os.getenv("PADDLE_VL_VERSION", "v1.6")
 
     # Chat / ai-chat nginx (Gemma 4)
     vllm_base_url: str = os.getenv("VLLM_BASE_URL", "http://127.0.0.1:8088/v1")

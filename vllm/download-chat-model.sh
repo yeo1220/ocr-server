@@ -15,8 +15,8 @@ if [[ -f .env ]]; then
   set +a
 fi
 
-MODEL_ID="${CHAT_HF_MODEL:-google/gemma-4-26b-a4b-it}"
-DIR_NAME="${CHAT_MODEL_DIR:-gemma-4-26b-a4b-it}"
+MODEL_ID="${CHAT_HF_MODEL}"
+DIR_NAME="${CHAT_MODEL_DIR}"
 DEST="models/${DIR_NAME}"
 
 if [[ -f "${DEST}/config.json" ]]; then

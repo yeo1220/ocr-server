@@ -16,8 +16,8 @@ if [[ -f .env ]]; then
   set +a
 fi
 
-MODEL_ID="${REFINE_HF_MODEL:-Qwen/Qwen2.5-14B-Instruct}"
-DIR_NAME="${REFINE_MODEL_DIR:-Qwen2.5-14B-Instruct}"
+MODEL_ID="${REFINE_HF_MODEL}"
+DIR_NAME="${REFINE_MODEL_DIR}"
 DEST="models/${DIR_NAME}"
 
 if [[ -f "${DEST}/config.json" ]]; then
@@ -27,7 +27,7 @@ fi
 
 mkdir -p models
 echo "Downloading ${MODEL_ID} -> ${DEST}"
-echo "(DGX Spark 128GB 권장: 14B 한글 표 보정. 경량: REFINE_HF_MODEL=Qwen/Qwen2.5-7B-Instruct)"
+echo "(DGX Spark 128GB 권장: 14B 한글 표 보정. 경량: REFINE_HF_MODEL=${REFINE_HF_MODEL})"
 
 HF_TOKEN_ARGS=()
 if [[ -n "${HF_TOKEN:-}" ]]; then

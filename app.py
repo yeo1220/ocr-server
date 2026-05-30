@@ -1,4 +1,5 @@
 import json
+import httpx
 import logging
 import os
 import time
@@ -236,12 +237,26 @@ async def ocr_endpoint(
                         "Start vllm-ocr-vl: cd vllm && ./download-vl-model.sh && ./start.sh"
                     ),
                 )
-            result = await run_vl_ocr_page(
-                image_path,
-                table_mode=table_mode,
-                num_cols=table_cols or 9,
-                header_rows=table_header_rows,
-            )
+            try:
+                result = await run_vl_ocr_page(
+                    image_path,
+                    table_mode=table_mode,
+                    num_cols=table_cols or 9,
+                    header_rows=table_header_rows,
+                )
+            except httpx.TimeoutException as exc:
+                logger.error(
+                    "VL OCR timeout on page %s after %.0fs: %s",
+                    idx, settings.vllm_vl_timeout, exc,
+                )
+                raise HTTPException(
+                    status_code=504,
+                    detail=(
+                        f"VL OCR timed out on page {idx} "
+                        f"(>{int(settings.vllm_vl_timeout)}s). "
+                        "Page may be too dense; retry or lower VLLM_VL_MAX_TOKENS."
+                    ),
+                ) from exc
         else:
             from ocr_engine import run_ocr_image
             from preprocess import preprocess_for_ocr
