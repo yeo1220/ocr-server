@@ -15,7 +15,7 @@ if [[ -f .env ]]; then
 fi
 
 CHAT_DIR="${CHAT_MODEL_DIR:-gemma-4-26b-a4b-it}"
-VL_DIR="${VL_MODEL_DIR:-Qwen2.5-VL-32B-Instruct-AWQ}"
+VL_DIR="${VL_MODEL_DIR:-VARCO-VISION-2.0-14B}"
 
 missing=0
 if [[ ! -f "models/${CHAT_DIR}/config.json" ]]; then

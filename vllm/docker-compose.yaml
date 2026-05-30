@@ -41,8 +41,9 @@ services:
       vllm serve /models/${CHAT_MODEL_DIR:-gemma-4-26b-a4b-it}
       --served-model-name gemma-chat
       --host 0.0.0.0 --port 8000
-      --gpu-memory-utilization ${CHAT_GPU_MEMORY_UTIL:-0.38}
-      --max-model-len ${CHAT_MAX_MODEL_LEN:-32768}
+      --gpu-memory-utilization ${CHAT_GPU_MEMORY_UTIL:-0.28}
+      --max-model-len ${CHAT_MAX_MODEL_LEN:-8192}
+      --max-num-batched-tokens ${CHAT_MAX_NUM_BATCHED_TOKENS:-4096}
       --trust-remote-code
 
   vllm-ocr-vl:
@@ -78,10 +79,10 @@ services:
       start_period: 900s
     restart: unless-stopped
     command: >
-      vllm serve /models/${VL_MODEL_DIR:-Qwen2.5-VL-32B-Instruct-AWQ}
+      vllm serve /models/${VL_MODEL_DIR:-VARCO-VISION-2.0-14B}
       --served-model-name qwen-vl-ocr
       --host 0.0.0.0 --port 8003
-      --gpu-memory-utilization ${VL_GPU_MEMORY_UTIL:-0.55}
+      --gpu-memory-utilization ${VL_GPU_MEMORY_UTIL:-0.60}
       --max-model-len ${VL_MAX_MODEL_LEN:-16384}
       --max-num-batched-tokens ${VL_MAX_NUM_BATCHED_TOKENS:-4096}
       --trust-remote-code
