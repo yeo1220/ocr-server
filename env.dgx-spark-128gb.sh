@@ -4,10 +4,10 @@
 export OCR_BACKEND="${OCR_BACKEND:-vllm_vl}"
 export OCR_REFINE_DEFAULT="${OCR_REFINE_DEFAULT:-none}"
 
-# GPU memory split: Gemma 4 MoE ~50% (chat, 64GB / 128GB) — VL 컨테이너 별도 기동 시 0.35로 낮출 것
-export CHAT_GPU_MEMORY_UTIL="${CHAT_GPU_MEMORY_UTIL:-0.50}"
+# GPU memory split: Gemma 4 MoE ~55% (chat, 70GB / 128GB) — VL 컨테이너 별도 기동 시 0.40으로 낮출 것
+export CHAT_GPU_MEMORY_UTIL="${CHAT_GPU_MEMORY_UTIL:-0.55}"
 export VL_GPU_MEMORY_UTIL="${VL_GPU_MEMORY_UTIL:-0.20}"
-export CHAT_MAX_MODEL_LEN="${CHAT_MAX_MODEL_LEN:-8192}"
+export CHAT_MAX_MODEL_LEN="${CHAT_MAX_MODEL_LEN:-131072}"
 export VL_MAX_MODEL_LEN="${VL_MAX_MODEL_LEN:-16384}"
 
 # ai-chat: Gemma 4 (MoE 26B, ~3.8B active)
